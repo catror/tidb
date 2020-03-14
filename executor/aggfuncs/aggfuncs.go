@@ -108,6 +108,12 @@ type AggFunc interface {
 	// every field to the proper original state.
 	ResetPartialResult(pr PartialResult)
 
+	// TODO: comment
+	EvalNextInputVec(sctx sessionctx.Context, input *chunk.Chunk) error
+
+	// TODO: comment
+	UpdatePartialResultVec(sctx sessionctx.Context, rowIds []int, pr PartialResult) error
+
 	// UpdatePartialResult updates the specific partial result for an aggregate
 	// function using the input rows which all belonging to the same data group.
 	// It converts the PartialResult to the specific data structure which stores
@@ -138,6 +144,16 @@ type baseAggFunc struct {
 	// ordinal stores the ordinal of the columns in the output chunk, which is
 	// used to append the final result of this function.
 	ordinal int
+
+	vecResults []*chunk.Column
+}
+
+func (*baseAggFunc) EvalNextInputVec(sctx sessionctx.Context, input *chunk.Chunk) error {
+	return nil
+}
+
+func (*baseAggFunc) UpdatePartialResultVec(sctx sessionctx.Context, rowIds []int, pr PartialResult) error {
+	return nil
 }
 
 func (*baseAggFunc) MergePartialResult(sctx sessionctx.Context, src, dst PartialResult) error {

@@ -16,6 +16,7 @@ package aggfuncs
 import (
 	"github.com/cznic/mathutil"
 	"github.com/pingcap/parser/mysql"
+
 	"github.com/pingcap/tidb/sessionctx"
 	"github.com/pingcap/tidb/types"
 	"github.com/pingcap/tidb/util/chunk"
@@ -80,6 +81,32 @@ type avgOriginal4Decimal struct {
 	baseAvgDecimal
 }
 
+func (e *avgOriginal4Decimal) EvalNextInputVec(sctx sessionctx.Context, input *chunk.Chunk) error {
+	if len(e.vecResults) == 0 {
+		e.vecResults = append(e.vecResults, chunk.NewColumn(e.args[0].GetType(), 0))
+	}
+	return e.args[0].VecEvalDecimal(sctx, input, e.vecResults[0])
+}
+
+func (e *avgOriginal4Decimal) UpdatePartialResultVec(sctx sessionctx.Context, rowIds []int, pr PartialResult) error {
+	p := (*partialResult4AvgDecimal)(pr)
+	decs := e.vecResults[0].Decimals()
+	for _, rowID := range rowIds {
+		if e.vecResults[0].IsNull(rowID) {
+			continue
+		}
+
+		newSum := new(types.MyDecimal)
+		err := types.DecimalAdd(&p.sum, &decs[rowID], newSum)
+		if err != nil {
+			return err
+		}
+		p.sum = *newSum
+		p.count++
+	}
+	return nil
+}
+
 func (e *avgOriginal4Decimal) UpdatePartialResult(sctx sessionctx.Context, rowsInGroup []chunk.Row, pr PartialResult) error {
 	p := (*partialResult4AvgDecimal)(pr)
 	for _, row := range rowsInGroup {
@@ -104,6 +131,42 @@ func (e *avgOriginal4Decimal) UpdatePartialResult(sctx sessionctx.Context, rowsI
 
 type avgPartial4Decimal struct {
 	baseAvgDecimal
+}
+
+func (e *avgPartial4Decimal) EvalNextInputVec(sctx sessionctx.Context, input *chunk.Chunk) error {
+	if len(e.vecResults) == 0 {
+		e.vecResults = append(e.vecResults, chunk.NewColumn(e.args[0].GetType(), 0))
+		e.vecResults = append(e.vecResults, chunk.NewColumn(e.args[1].GetType(), 0))
+	}
+
+	e.vecResults[0].Reset(e.args[0].GetType().EvalType())
+	err := e.args[0].VecEvalInt(sctx, input, e.vecResults[0])
+	if err != nil {
+		return err
+	}
+
+	e.vecResults[1].Reset(e.args[1].GetType().EvalType())
+	return e.args[1].VecEvalDecimal(sctx, input, e.vecResults[1])
+}
+
+func (e *avgPartial4Decimal) UpdatePartialResultVec(sctx sessionctx.Context, rowIds []int, pr PartialResult) error {
+	p := (*partialResult4AvgDecimal)(pr)
+	counts := e.vecResults[0].Int64s()
+	sums := e.vecResults[1].Decimals()
+	for _, rowID := range rowIds {
+		if e.vecResults[0].IsNull(rowID) || e.vecResults[1].IsNull(rowID) {
+			continue
+		}
+
+		newSum := new(types.MyDecimal)
+		err := types.DecimalAdd(&p.sum, &sums[rowID], newSum)
+		if err != nil {
+			return err
+		}
+		p.sum = *newSum
+		p.count += counts[rowID]
+	}
+	return nil
 }
 
 func (e *avgPartial4Decimal) UpdatePartialResult(sctx sessionctx.Context, rowsInGroup []chunk.Row, pr PartialResult) error {
@@ -172,6 +235,41 @@ func (e *avgOriginal4DistinctDecimal) ResetPartialResult(pr PartialResult) {
 	p.sum = *types.NewDecFromInt(0)
 	p.count = int64(0)
 	p.valSet = set.NewStringSet()
+}
+
+func (e *avgOriginal4DistinctDecimal) EvalNextInputVec(sctx sessionctx.Context, input *chunk.Chunk) error {
+	if len(e.vecResults) == 0 {
+		e.vecResults = append(e.vecResults, chunk.NewColumn(e.args[0].GetType(), 0))
+	}
+	return e.args[0].VecEvalDecimal(sctx, input, e.vecResults[0])
+}
+
+func (e *avgOriginal4DistinctDecimal) UpdatePartialResultVec(sctx sessionctx.Context, rowIds []int, pr PartialResult) error {
+	p := (*partialResult4AvgDistinctDecimal)(pr)
+	decs := e.vecResults[0].Decimals()
+	for _, rowID := range rowIds {
+		if e.vecResults[0].IsNull(rowID) {
+			continue
+		}
+
+		hash, err := decs[rowID].ToHashKey()
+		if err != nil {
+			return err
+		}
+		decStr := string(hack.String(hash))
+		if p.valSet.Exist(decStr) {
+			continue
+		}
+		p.valSet.Insert(decStr)
+		newSum := new(types.MyDecimal)
+		err = types.DecimalAdd(&p.sum, &decs[rowID], newSum)
+		if err != nil {
+			return err
+		}
+		p.sum = *newSum
+		p.count++
+	}
+	return nil
 }
 
 func (e *avgOriginal4DistinctDecimal) UpdatePartialResult(sctx sessionctx.Context, rowsInGroup []chunk.Row, pr PartialResult) error {
@@ -268,6 +366,27 @@ type avgOriginal4Float64 struct {
 	baseAvgFloat64
 }
 
+func (e *avgOriginal4Float64) EvalNextInputVec(sctx sessionctx.Context, input *chunk.Chunk) error {
+	if len(e.vecResults) == 0 {
+		e.vecResults = append(e.vecResults, chunk.NewColumn(e.args[0].GetType(), 0))
+	}
+	return e.args[0].VecEvalReal(sctx, input, e.vecResults[0])
+}
+
+func (e *avgOriginal4Float64) UpdatePartialResultVec(sctx sessionctx.Context, rowIds []int, pr PartialResult) error {
+	p := (*partialResult4AvgFloat64)(pr)
+	floats := e.vecResults[0].Float64s()
+	for _, rowID := range rowIds {
+		if e.vecResults[0].IsNull(rowID) {
+			continue
+		}
+
+		p.sum += floats[rowID]
+		p.count++
+	}
+	return nil
+}
+
 func (e *avgOriginal4Float64) UpdatePartialResult(sctx sessionctx.Context, rowsInGroup []chunk.Row, pr PartialResult) error {
 	p := (*partialResult4AvgFloat64)(pr)
 	for _, row := range rowsInGroup {
@@ -287,6 +406,37 @@ func (e *avgOriginal4Float64) UpdatePartialResult(sctx sessionctx.Context, rowsI
 
 type avgPartial4Float64 struct {
 	baseAvgFloat64
+}
+
+func (e *avgPartial4Float64) EvalNextInputVec(sctx sessionctx.Context, input *chunk.Chunk) error {
+	if len(e.vecResults) == 0 {
+		e.vecResults = append(e.vecResults, chunk.NewColumn(e.args[0].GetType(), 0))
+		e.vecResults = append(e.vecResults, chunk.NewColumn(e.args[1].GetType(), 0))
+	}
+
+	e.vecResults[0].Reset(e.args[0].GetType().EvalType())
+	err := e.args[0].VecEvalInt(sctx, input, e.vecResults[0])
+	if err != nil {
+		return err
+	}
+
+	e.vecResults[1].Reset(e.args[1].GetType().EvalType())
+	return e.args[1].VecEvalReal(sctx, input, e.vecResults[1])
+}
+
+func (e *avgPartial4Float64) UpdatePartialResultVec(sctx sessionctx.Context, rowIds []int, pr PartialResult) error {
+	p := (*partialResult4AvgFloat64)(pr)
+	counts := e.vecResults[0].Int64s()
+	sums := e.vecResults[1].Float64s()
+	for _, rowID := range rowIds {
+		if e.vecResults[0].IsNull(rowID) || e.vecResults[1].IsNull(rowID) {
+			continue
+		}
+
+		p.sum += sums[rowID]
+		p.count += counts[rowID]
+	}
+	return nil
 }
 
 func (e *avgPartial4Float64) UpdatePartialResult(sctx sessionctx.Context, rowsInGroup []chunk.Row, pr PartialResult) error {
@@ -341,6 +491,28 @@ func (e *avgOriginal4DistinctFloat64) ResetPartialResult(pr PartialResult) {
 	p.sum = float64(0)
 	p.count = int64(0)
 	p.valSet = set.NewFloat64Set()
+}
+
+func (e *avgOriginal4DistinctFloat64) EvalNextInputVec(sctx sessionctx.Context, input *chunk.Chunk) error {
+	if len(e.vecResults) == 0 {
+		e.vecResults = append(e.vecResults, chunk.NewColumn(e.args[0].GetType(), 0))
+	}
+	return e.args[0].VecEvalReal(sctx, input, e.vecResults[0])
+}
+
+func (e *avgOriginal4DistinctFloat64) UpdatePartialResultVec(sctx sessionctx.Context, rowIds []int, pr PartialResult) error {
+	p := (*partialResult4AvgDistinctFloat64)(pr)
+	floats := e.vecResults[0].Float64s()
+	for _, rowID := range rowIds {
+		if e.vecResults[0].IsNull(rowID) || p.valSet.Exist(floats[rowID]) {
+			continue
+		}
+
+		p.sum += floats[rowID]
+		p.count++
+		p.valSet.Insert(floats[rowID])
+	}
+	return nil
 }
 
 func (e *avgOriginal4DistinctFloat64) UpdatePartialResult(sctx sessionctx.Context, rowsInGroup []chunk.Row, pr PartialResult) error {
